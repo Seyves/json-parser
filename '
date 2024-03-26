@@ -1,0 +1,387 @@
+package main
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"regexp"
+	"strconv"
+	"strings"
+)
+
+type Boundary struct {
+    Value []rune
+}
+
+func (boundary Boundary) getLength () []rune {
+    return len(boundary.Value)
+}
+
+type ArrayBoundary struct {
+    Boundary
+}
+
+func (boundary ArrayBoundary) parse (parent *Node, key string) ([]Node, error) {
+    value := boundary.Value
+	unparsedNodes := make([]Parsable, 0)
+	nodes := make([]Node, 0)
+
+	for i := 0; i < len(value); i++ {
+		if i > 0 && value[i] != ',' {
+			return nodes, errors.New(fmt.Sprintf("Expected ',', found %q", value[i]))
+		}
+
+		if i > 0 {
+			i++
+		}
+
+		var boundary Parsable
+		var err error
+
+		switch value[i] {
+		case '{':
+			boundary, err = getObjectBoundary(value, i)
+			break
+		case '[':
+			boundary, err = getArrayBoundary(value, i)
+			break
+		default:
+			boundary, err = getValueBoundary(value, i)
+			break
+		}
+
+		if err != nil {
+			return nodes, err
+		}
+
+		unparsedNodes = append(unparsedNodes, boundary)
+
+		i = i + len(boundary.getValue()) + 1
+	}
+
+	parentNode := Node{parent, key, "array", nil}
+
+	nodes = append(nodes, parentNode)
+
+	for i, item := range unparsedNodes {
+        parsed, err := item.parse(&parentNode, fmt.Sprint(i))
+
+        if err != nil {
+            return nodes, err
+        }
+
+        nodes = append(nodes, parsed...)
+    }
+
+	return nodes, nil
+}
+
+type UnparsedObject struct {
+    Value []rune
+}
+
+type UnparsedValue struct {
+    Value []rune
+}
+
+type Parsable interface {
+    getValue() []rune
+    parse(*Node, string) ([]Node, error)
+}
+
+type Node struct {
+	parent *Node
+	key    string
+	kind   string
+	value  any
+}
+
+var digitRegex = regexp.MustCompile(`^\d+$`)
+
+func parseValue(parent *Node, key string, value []rune) (Node, error) {
+	switch val := string(value); {
+	case val == "null":
+		return Node{parent, key, "null", nil}, nil
+	case val == "undefined":
+		return Node{parent, key, "undefined", nil}, nil
+	case val == "true":
+		return Node{parent, key, "bool", true}, nil
+	case val == "false":
+		return Node{parent, key, "bool", false}, nil
+	case digitRegex.MatchString(val):
+		resultValue, err := strconv.Atoi(val)
+
+		if err != nil {
+			panic(err)
+		}
+
+		return Node{parent, key, "digit", resultValue}, nil
+	case value[0] == '"' && value[len(value)-1] == '"':
+		return Node{parent, key, "string", string(value[1 : len(value)-1])}, nil
+	}
+
+	return Node{parent, key, "", nil}, errors.New(fmt.Sprintf("Invalid value: %s", string(value)))
+}
+
+func getArrayBoundary(input []rune, startIndex int) (Parsable, error) {
+	nestedLevel := 0
+
+	for endIndex := startIndex; endIndex < len(input); endIndex++ {
+		char := input[endIndex]
+
+		if char == '[' {
+			nestedLevel++
+		}
+		if char == ']' {
+			nestedLevel--
+			if nestedLevel == 0 {
+				return ArrayBoundary{Boundary{input[startIndex+1: endIndex]}}, nil
+			}
+		}
+		if char == ',' {
+			if nestedLevel == 0 {
+				return ArrayBoundary{Boundary{input[startIndex+1: endIndex]}}, nil
+			}
+		}
+	}
+
+	return ArrayBoundary{Boundary{make([]rune, 0)}}, 
+        errors.New(fmt.Sprintf("No closing found for array, starting at %d", startIndex))
+}
+
+func getObjectBoundary(input []rune, startIndex int) (Parsable, error) {
+	nestedLevel := 0
+
+	for i := startIndex; i < len(input); i++ {
+		char := input[i]
+
+		if char == '{' {
+			nestedLevel++
+		}
+		if char == '}' {
+			nestedLevel--
+			if nestedLevel == 0 {
+				return Boundary{input[startIndex+1: i]}, nil
+			}
+		}
+		if char == ',' {
+			if nestedLevel == 0 {
+				return Boundary{input[startIndex+1 : i]}, nil
+			}
+		}
+	}
+
+	return Boundary{make([]rune, 0)},
+		errors.New(fmt.Sprintf("No closing found for object, starting at %d", startIndex))
+}
+
+func stringEndFinder(input []rune, startIndex int) (Boundary, error) {
+	isEscape := false
+
+	for endIndex := startIndex + 1; endIndex < len(input); endIndex++ {
+		char := input[endIndex]
+
+		if char == '"' && !isEscape {
+            return Boundary{input[startIndex:endIndex+1]}, nil
+		}
+
+		if char == '\\' {
+			isEscape = true
+		} else {
+			isEscape = false
+		}
+	}
+
+	return Boundary{make([]rune, 0)}, 
+        errors.New(fmt.Sprintf("No closing found for string, starting at %d", startIndex))
+}
+
+func getValueBoundary(input []rune, startIndex int) (Parsable, error) {
+	if input[startIndex] == '"' {
+		return stringEndFinder(input, startIndex)
+	}
+
+	fmt.Println("Not string value")
+
+	for endIndex := startIndex + 1; endIndex < len(input); endIndex++ {
+		char := input[endIndex]
+
+		if char == ',' || char == '}' || char == ']' {
+            return Boundary{input[startIndex:endIndex]}, nil
+		}
+	}
+
+	return Boundary{input[startIndex:]}, nil
+}
+
+func parseArray(parent *Node, key string, value []rune) ([]Node, error) {
+	blankNodes := make([]Boundary, 0)
+	nodes := make([]Node, 0)
+
+	for i := 0; i < len(value); i++ {
+		if i > 0 && value[i] != ',' {
+			return nodes, errors.New(fmt.Sprintf("Expected ',', found %q", value[i]))
+		}
+
+		if i > 0 {
+			i++
+		}
+
+		var blankNode Boundary
+		var err error
+
+		switch value[i] {
+		case '{':
+			blankNode, err = getObjectBoundary(value, i)
+			break
+		case '[':
+			blankNode, err = getArrayBoundary(value, i)
+			break
+		default:
+			blankNode, err = getValueBoundary(value, i)
+			break
+		}
+
+		if err != nil {
+			return nodes, err
+		}
+
+		blankNodes = append(blankNodes, blankNode)
+
+		i = i + len(blankNode.Value) + 1
+	}
+
+	parentNode := Node{parent, key, "array", nil}
+
+	nodes = append(nodes, parentNode)
+
+	for i, item := range blankNodes {
+		if item.Kind == "object" {
+			parsed, err := parseObject(&parentNode, fmt.Sprint(i), item.Value)
+
+			if err != nil {
+				return nodes, err
+			}
+
+			nodes = append(nodes, parsed...)
+		} else if item.Kind == "array" {
+			parsed, err := parseArray(&parentNode, fmt.Sprint(i), item.Value)
+
+			if err != nil {
+				return nodes, err
+			}
+
+			nodes = append(nodes, parsed...)
+		} else {
+			parsed, err := parseValue(&parentNode, fmt.Sprint(i), item.Value)
+
+			if err != nil {
+				return nodes, err
+			}
+
+			nodes = append(nodes, parsed)
+		}
+	}
+
+	return nodes, nil
+}
+
+func parseObject(parent *Node, key string, value []rune) ([]Node, error) {
+	blankNodes := make([][2]Boundary, 0)
+	nodes := make([]Node, 0)
+
+	for i := 0; i < len(value); i++ {
+		fmt.Println("i: ", string(value[i]))
+
+		if i > 0 && value[i] != ',' {
+			return nodes, errors.New(fmt.Sprintf("Expected ',', found %q", value[i]))
+		}
+
+		keyNode, err := stringEndFinder(value, i + 1)
+
+		if err != nil {
+			return nodes, err
+		}
+
+		key := keyNode.Value
+
+        fmt.Println(string(keyNode.Value))
+
+		i = i + len(keyNode.Value) 
+
+		if value[i] != ':' {
+			return nodes, errors.New(fmt.Sprintf("Expected ':', found %q", value[i]))
+		}
+
+		i++
+
+		var blankNode Boundary
+
+		switch value[i] {
+		case '{':
+			blankNode, err = getObjectBoundary(value, i)
+			break
+		case '[':
+			blankNode, err = getArrayBoundary(value, i)
+			break
+		default:
+			blankNode, err = getValueBoundary(value, i)
+			break
+		}
+
+		fmt.Println("endIndex: ", string(key), string(blankNode.Value))
+		if err != nil {
+			return nodes, err
+		}
+
+		blankNodes = append(blankNodes, [2]Boundary{keyNode, blankNode})
+
+		i = i + len(blankNode.Value) - 1
+	}
+
+	parentNode := Node{parent, key, "object", nil}
+
+	nodes = append(nodes, parentNode)
+
+	for _, prop := range blankNodes {
+		keyNode := prop[0]
+		valueNode := prop[1]
+
+		if valueNode.Kind == "object" {
+			parsed, err := parseObject(&parentNode, string(keyNode.Value), valueNode.Value)
+			if err != nil {
+				return nodes, err
+			}
+			nodes = append(nodes, parsed...)
+		} else if valueNode.Kind == "array" {
+			parsed, err := parseArray(&parentNode, string(keyNode.Value), valueNode.Value)
+			if err != nil {
+				return nodes, err
+			}
+			nodes = append(nodes, parsed...)
+		} else {
+			parsed, err := parseValue(&parentNode, string(keyNode.Value), valueNode.Value)
+			if err != nil {
+				return nodes, err
+			}
+			nodes = append(nodes, parsed)
+		}
+	}
+
+	return nodes, nil
+}
+
+func main() {
+	file, err := os.ReadFile("./data.json")
+
+	if err != nil {
+		panic(err)
+	}
+
+	processed := strings.ReplaceAll(string(file), "\n", "")
+	processed = strings.ReplaceAll(string(processed), " ", "")
+
+	processed = processed[1 : len(processed)-1]
+
+	fmt.Println(parseArray(nil, "", []rune(processed)))
+}
