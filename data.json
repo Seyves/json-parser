@@ -3,7 +3,7 @@
     "_id": "5973782bdb9a930533b05cb2",
     "isActive": true,
     "balance": "$1,446.35",
-    "age": 32,
+    "age": null,
     "eyeColor": "green",
     "name": "Logan Keller",
     "gender": "male",
@@ -12,7 +12,7 @@
     "phone": "+1 (952) 533-2258",
     "friends": [
       {
-        "id": 0,
+        "id": null,
         "name": "Colon Salazar",
         "emptyArray": [["asdfsdf"], {}]
       },

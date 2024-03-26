@@ -9,102 +9,114 @@ import (
 	"strings"
 )
 
-type Boundary struct {
+type Object map[string]interface{}
+type Array []interface{}
+type Null struct {}
+
+type boundary struct {
     Value []rune
 }
 
-func (boundary Boundary) getActualLength () int {
-    return len(boundary.Value)
+func (bound boundary) getActualLength () int {
+    return len(bound.Value)
 }
 
-func (boundary Boundary) getValue() []rune {
-    return boundary.Value
+func (bound boundary) getValue() []rune {
+    return bound.Value
 }
 
-type ArrayBoundary struct {
-    Boundary
+type arrayBoundary struct {
+    boundary
 }
 
-func (boundary ArrayBoundary) getActualLength() int {
-    return len(boundary.Value) + 2
+func (bound arrayBoundary) getActualLength() int {
+    return len(bound.Value) + 2
 }
 
-func (parentBoundary ArrayBoundary) parse (parent *Node, key string) ([]Node, error) {
-	var boundaries []Parsable
-	var nodes []Node
+func (parentBoundary arrayBoundary) parse () (interface{}, error) {
+	var boundaries []parsable
+    var result Array
 
     parentValue := parentBoundary.Value
 
 	for i := 0; i < len(parentValue); i++ {
-        fmt.Println("i: ", string(parentValue[i]))
 		if i > 0 && parentValue[i] != ',' {
-			return nodes, errors.New(fmt.Sprintf("Expected ',', found %q", parentValue[i]))
+			return result, errors.New(fmt.Sprintf("Expected ',', found %q", parentValue[i]))
 		}
 
 		if i > 0 {
 			i++
 		}
 
-		var boundary Parsable
+		var bound parsable
 		var err error
 
 		switch parentValue[i] {
 		case '{':
-			boundary, err = getObjectBoundary(parentValue, i)
+			bound, err = getObjectBoundary(parentValue, i)
 			break
 		case '[':
-			boundary, err = getArrayBoundary(parentValue, i)
+			bound, err = getArrayBoundary(parentValue, i)
 			break
 		default:
-			boundary, err = getValueBoundary(parentValue, i)
+			bound, err = getValueBoundary(parentValue, i)
 			break
 		}
 
 		if err != nil {
-			return nodes, err
+			return result, err
 		}
 
-		boundaries = append(boundaries, boundary)
+		boundaries = append(boundaries, bound)
 
-		i = i + boundary.getActualLength() - 1
+		i = i + bound.getActualLength() - 1
 	}
 
-	parentNode := Node{parent, key, "array", nil}
-
-	nodes = append(nodes, parentNode)
-
-	for i, item := range boundaries {
-        parsed, err := item.parse(&parentNode, fmt.Sprint(i))
+	for _, item := range boundaries {
+        parsed, err := item.parse()
 
         if err != nil {
-            return nodes, err
+            return result, err
         }
 
-        nodes = append(nodes, parsed...)
+        sliceParsed, isSlice := parsed.(Array)
+
+        if isSlice {
+            result = append(result, sliceParsed...)
+        }
+
+        mapParsed, isMap := parsed.(Object)
+
+        if isMap {
+            result = append(result, mapParsed)
+        }
+
+        if !isMap && !isSlice {
+            result = append(result, parsed)
+        }
     }
 
-	return nodes, nil
+
+	return result, nil
 }
 
-type ObjectBoundary struct {
-    Boundary
+type objectBoundary struct {
+    boundary
 }
 
-func (boundary ObjectBoundary) getActualLength() int {
-    return len(boundary.Value) + 2
+func (bound objectBoundary) getActualLength() int {
+    return len(bound.Value) + 2
 }
 
-func (parentBoundary ObjectBoundary) parse (parent *Node, key string) ([]Node, error) {
-	var boundaries [][2]Parsable
-	var nodes []Node
+func (parentBoundary objectBoundary) parse () (interface{}, error) {
+	var boundaries [][2]parsable
+    result := Object{}
 
     parentValue := parentBoundary.Value
 
 	for i := 0; i < len(parentValue); i++ {
-		fmt.Println("i:", string(parentValue[i]))
-
 		if i > 0 && parentValue[i] != ',' {
-			return nodes, errors.New(fmt.Sprintf("Expected ',', found %q", parentValue[i]))
+			return result, errors.New(fmt.Sprintf("Expected ',', found %q", parentValue[i]))
 		}
 
         if (i > 0) {
@@ -113,111 +125,100 @@ func (parentBoundary ObjectBoundary) parse (parent *Node, key string) ([]Node, e
 
 		keyBoundary, err := getStringBoundary(parentValue, i)
 
-		fmt.Println("key:", string(keyBoundary.getValue()))
-  
 		if err != nil {
-			return nodes, err
+			return result, err
 		}
 
 		i = i + keyBoundary.getActualLength()
 
 		if parentValue[i] != ':' {
-			return nodes, errors.New(fmt.Sprintf("Expected ':', found %q", parentValue[i]))
+			return result, errors.New(fmt.Sprintf("Expected ':', found %q", parentValue[i]))
 		}
 
 		i++
 
-		var boundary Parsable
+		var bound parsable
 
 		switch parentValue[i] {
 		case '{':
-			boundary, err = getObjectBoundary(parentValue, i)
+			bound, err = getObjectBoundary(parentValue, i)
 			break
 		case '[':
-			boundary, err = getArrayBoundary(parentValue, i)
+			bound, err = getArrayBoundary(parentValue, i)
 			break
 		default:
-			boundary, err = getValueBoundary(parentValue, i)
+			bound, err = getValueBoundary(parentValue, i)
 			break
 		}
 
-		fmt.Println("endIndex: ", string(key), string(boundary.getValue()))
 		if err != nil {
-			return nodes, err
+			return result, err
 		}
 
-		boundaries = append(boundaries, [2]Parsable{keyBoundary, boundary})
+		boundaries = append(boundaries, [2]parsable{keyBoundary, bound})
 
-		i = i + boundary.getActualLength() - 1
+		i = i + bound.getActualLength() - 1
 	}
-
-	parentNode := Node{parent, key, "object", nil}
-
-	nodes = append(nodes, parentNode)
 
 	for _, keyValue := range boundaries {
-        parsed, err := keyValue[1].parse(&parentNode, string(keyValue[0].getValue()))
+        parsedKey, err := keyValue[0].parse()
 
         if err != nil {
-            return nodes, err
+            return result, err
         }
 
-        nodes = append(nodes, parsed...)
+        stringKey, ok := parsedKey.(string)
+        
+        if !ok {
+            panic("Error while parsing key")
+        }
+
+        parsed, err := keyValue[1].parse()
+
+        if err != nil {
+            return result, err
+        }
+
+        result[stringKey] = parsed
 	}
 
-	return nodes, nil
+	return result, nil
 }
 
-type ValueBoundary struct {
-    Boundary
+type valueBoundary struct {
+    boundary
 }
 
-func (parentBoundary ValueBoundary) parse (parent *Node, key string) ([]Node, error) {
-    var node Node
-
+func (parentBoundary valueBoundary) parse () (interface{}, error) {
 	switch val := string(parentBoundary.Value); {
 	case val == "null":
-		node = Node{parent, key, "null", nil}
-        break
-	case val == "undefined":
-		node = Node{parent, key, "undefined", nil}
-        break
+        return Null{}, nil
 	case val == "true":
-		node = Node{parent, key, "bool", true}
-        break
+        return true, nil
 	case val == "false":
-		node = Node{parent, key, "bool", false}
+        return false, nil
 	case digitRegex.MatchString(val):
 		resultValue, err := strconv.Atoi(val)
 		if err != nil {
 			panic(err)
 		}
-		node = Node{parent, key, "digit", resultValue}
+        return resultValue, nil
 	case parentBoundary.Value[0] == '"' && parentBoundary.Value[parentBoundary.getActualLength()-1] == '"':
-		node = Node{parent, key, "string", string(parentBoundary.Value[1 : parentBoundary.getActualLength()-1])}
+		return string(parentBoundary.Value[1 : parentBoundary.getActualLength()-1]), nil
     default:
-        return []Node{{parent, key, "", nil}}, errors.New(fmt.Sprintf("Invalid value: %s", string(parentBoundary.Value)))
+        return nil, errors.New(fmt.Sprintf("Invalid value: %s", string(parentBoundary.Value)))
 	}
-
-    return []Node{node}, nil
 }
 
-type Parsable interface {
+type parsable interface {
     getActualLength() int
     getValue() []rune
-    parse(*Node, string) ([]Node, error)
-}
-
-type Node struct {
-	parent *Node
-	key    string
-	kind   string
-	value  any
+    parse() (interface{}, error)
 }
 
 var digitRegex = regexp.MustCompile(`^\d+$`)
 
-func getArrayBoundary(input []rune, startIndex int) (Parsable, error) {
+func getArrayBoundary(input []rune, startIndex int) (parsable, error) {
     var nestedLevel int
 
 	for endIndex := startIndex; endIndex < len(input); endIndex++ {
@@ -229,21 +230,21 @@ func getArrayBoundary(input []rune, startIndex int) (Parsable, error) {
 		if char == ']' {
 			nestedLevel--
 			if nestedLevel == 0 {
-				return ArrayBoundary{Boundary{input[startIndex+1: endIndex]}}, nil
+				return arrayBoundary{boundary{input[startIndex+1: endIndex]}}, nil
 			}
 		}
 		if char == ',' {
 			if nestedLevel == 0 {
-				return ArrayBoundary{Boundary{input[startIndex+1: endIndex]}}, nil
+				return arrayBoundary{boundary{input[startIndex+1: endIndex]}}, nil
 			}
 		}
 	}
 
-	return ArrayBoundary{Boundary{make([]rune, 0)}}, 
+	return arrayBoundary{boundary{make([]rune, 0)}}, 
         errors.New(fmt.Sprintf("No closing found for array, starting at %d", startIndex))
 }
 
-func getObjectBoundary(input []rune, startIndex int) (Parsable, error) {
+func getObjectBoundary(input []rune, startIndex int) (parsable, error) {
     var nestedLevel int
 
 	for i := startIndex; i < len(input); i++ {
@@ -255,28 +256,28 @@ func getObjectBoundary(input []rune, startIndex int) (Parsable, error) {
 		if char == '}' {
 			nestedLevel--
 			if nestedLevel == 0 {
-				return ObjectBoundary{Boundary{input[startIndex+1: i]}}, nil
+				return objectBoundary{boundary{input[startIndex+1: i]}}, nil
 			}
 		}
 		if char == ',' {
 			if nestedLevel == 0 {
-				return ObjectBoundary{Boundary{input[startIndex+1 : i]}}, nil
+				return objectBoundary{boundary{input[startIndex+1 : i]}}, nil
 			}
 		}
 	}
 
-	return ObjectBoundary{Boundary{make([]rune, 0)}},
+	return objectBoundary{boundary{make([]rune, 0)}},
 		errors.New(fmt.Sprintf("No closing found for object, starting at %d", startIndex))
 }
 
-func getStringBoundary(input []rune, startIndex int) (Parsable, error) {
+func getStringBoundary(input []rune, startIndex int) (parsable, error) {
     var isEscape bool
 
 	for endIndex := startIndex + 1; endIndex < len(input); endIndex++ {
 		char := input[endIndex]
 
 		if char == '"' && !isEscape {
-            return ValueBoundary{Boundary{input[startIndex:endIndex+1]}}, nil
+            return valueBoundary{boundary{input[startIndex:endIndex+1]}}, nil
 		}
 
 		if char == '\\' {
@@ -286,26 +287,104 @@ func getStringBoundary(input []rune, startIndex int) (Parsable, error) {
 		}
 	}
 
-	return ValueBoundary{Boundary{make([]rune, 0)}}, 
+	return valueBoundary{boundary{make([]rune, 0)}}, 
         errors.New(fmt.Sprintf("No closing found for string, starting at %d", startIndex))
 }
 
-func getValueBoundary(input []rune, startIndex int) (Parsable, error) {
+func getValueBoundary(input []rune, startIndex int) (parsable, error) {
 	if input[startIndex] == '"' {
 		return getStringBoundary(input, startIndex)
 	}
-
-	fmt.Println("Not string value")
 
 	for endIndex := startIndex + 1; endIndex < len(input); endIndex++ {
 		char := input[endIndex]
 
 		if char == ',' || char == '}' || char == ']' {
-            return ValueBoundary{Boundary{input[startIndex:endIndex]}}, nil
+            return valueBoundary{boundary{input[startIndex:endIndex]}}, nil
 		}
 	}
 
-	return ValueBoundary{Boundary{input[startIndex:]}}, nil
+	return valueBoundary{boundary{input[startIndex:]}}, nil
+}
+
+type JSON struct {
+    view interface{}
+    length int
+}
+
+func (json JSON) Get(path string) (interface{}) {
+    if path == "" {
+        return json.view
+    }
+
+    keys := strings.Split(path, ".") 
+
+    current := json.view
+
+    for _, key := range keys {
+        runed := []rune(key)
+
+        if runed[0] == '[' && runed[len(key)-1] == ']' {
+            currentSlice, ok := current.(Array)            
+
+            if !ok {
+                return nil
+            }
+
+            index, err := strconv.Atoi(string(runed[1:len(key)-1]))
+
+            if err != nil {
+                panic(err)
+            }
+
+            current = currentSlice[index]
+        } else {
+            currentMap, ok := current.(Object)            
+
+            if !ok {
+                return nil
+            }
+
+            current = currentMap[key]
+        }
+    }
+
+    return current
+}
+
+func Create(input string) (JSON, error) {
+    replacer := strings.NewReplacer(" ", "", "\n", "")
+
+	processed := replacer.Replace(input)
+
+    var bound parsable
+    var err error 
+
+    runed := []rune(processed)
+
+    switch runed[0] {
+    case '{':
+        bound, err = getObjectBoundary(runed, 0)
+        break
+    case '[':
+        bound, err = getArrayBoundary(runed, 0)
+        break
+    default:
+        bound, err = getValueBoundary(runed, 0)
+        break
+    }
+
+    if err != nil {
+        return JSON{"", 0}, err
+    }
+
+    parsed, err := bound.parse()
+
+    if err != nil {
+        return JSON{"", 0}, err
+    }
+
+    return JSON{parsed, len(runed)}, nil
 }
 
 func main() {
@@ -315,12 +394,15 @@ func main() {
 		panic(err)
 	}
 
-	processed := strings.ReplaceAll(string(file), "\n", "")
-	processed = strings.ReplaceAll(string(processed), " ", "")
+    json, err := Create(string(file))
 
-	processed = processed[1 : len(processed)-1]
+    if err != nil {
+        fmt.Println(err)
+    }
 
-    boundary := ArrayBoundary{Boundary{[]rune(processed)}}
+    someValue, ok := json.Get("").(Array)
 
-	fmt.Println(boundary.parse(nil, "", ))
+    if ok {
+        fmt.Println(someValue)
+    }
 }
