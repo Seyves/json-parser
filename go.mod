@@ -1,5 +1,7 @@
-module json-parser
+module parser-env
 
 go 1.21.4
 
-require golang.org/dl v0.0.0-20240305174203-2885f567d808 // indirect
+replace jsonparser => ./jsonparser
+
+require jsonparser v0.0.0-00010101000000-000000000000

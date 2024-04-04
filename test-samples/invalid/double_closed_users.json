@@ -1,0 +1,20 @@
+[
+    {
+        "name": "Michael",
+        "age": 30,
+        "height": 183,
+        "married": true
+    },
+    {
+        "name": "John",
+        "age": 23,
+        "height": 174.5,
+        "married": false
+    },
+    {
+        "name": "Kenny",
+        "age": 20,
+        "height": 194,
+        "married": false
+    }
+]] 
