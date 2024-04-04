@@ -1,8 +1,7 @@
-package main
+package jsonparser
 
 import (
 	"fmt"
-	"jsonparser"
 	"os"
 	"testing"
 )
@@ -21,7 +20,7 @@ func TestValid(t *testing.T) {
             t.Fatal(err)
         }
 
-        _, err = jsonparser.Create(string(file))
+        _, err = Create(string(file))
 
         if err != nil {
             t.Error(entry.Name(), "\n", err)
@@ -43,7 +42,7 @@ func TestInvalid(t *testing.T) {
             t.Fatal(err)
         }
 
-        _, err = jsonparser.Create(string(file))
+        _, err = Create(string(file))
 
         if err == nil {
             t.Error(entry.Name(), "\n", "Invalid json passed")
