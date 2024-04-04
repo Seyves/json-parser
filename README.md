@@ -1,4 +1,4 @@
-#json-parser
+# json-parser
 
 Json parser I built for learning purposes. It converts arrays to slices and object to maps. 
 
